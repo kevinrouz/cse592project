@@ -7,7 +7,7 @@ avoids picking a flat, easy day as the success example. The plotted model is the
 conformally calibrated one, whose median is the same as the uncalibrated model's.
 
 Usage: python src/plots.py [config]   (reads val_predictions_<config>.parquet; default "final")
-Writes reports/figures/example_success.png and example_failure.png.
+Writes reports/figures/examples.png, with the success case on the left.
 """
 
 import sys
@@ -21,27 +21,24 @@ FIG = ROOT / "reports" / "figures"
 MODEL = "lightgbm_cqr"
 
 
-def plot_origin(preds, origin, title, path):
+def draw_origin(ax, preds, origin, title, legend):
     lgbm = preds[(preds["model"] == MODEL) & (preds["origin"] == origin)]
     naive = preds[(preds["model"] == "naive_day") & (preds["origin"] == origin)]
     lgbm = lgbm.sort_values(["horizon", "hour"])
     naive = naive.sort_values(["horizon", "hour"])
     x = range(1, 49)
 
-    fig, ax = plt.subplots(figsize=(7, 3))
-    ax.fill_between(x, lgbm["q10"], lgbm["q90"], color="#9dc3e6", alpha=0.6, label="LightGBM 10-90%")
-    ax.plot(x, lgbm["q50"], color="#1f4e79", lw=1.5, label="LightGBM median")
+    ax.fill_between(x, lgbm["q10"], lgbm["q90"], color="#9dc3e6", alpha=0.6, label="10-90% interval")
+    ax.plot(x, lgbm["q50"], color="#1f4e79", lw=1.5, label="Median")
     ax.plot(x, naive["q50"], color="#7f7f7f", lw=1, ls="--", label="Naive (same hour, day D)")
     ax.plot(x, lgbm["price"], color="#c00000", lw=1.5, label="Actual")
     ax.axvline(24.5, color="black", lw=0.5)
     ax.set_xticks([1, 7, 13, 19, 25, 31, 37, 43, 48])
-    ax.set_xticklabels(["D+1 1", "7", "13", "19", "D+2 1", "7", "13", "19", "24"])
-    ax.set_xlabel("Hour ending")
-    ax.set_ylabel("$/MWh")
-    ax.set_title(title)
-    ax.legend(fontsize=7, loc="upper left")
-    fig.tight_layout()
-    fig.savefig(path, dpi=200)
+    ax.set_xticklabels(["D+1 1", "7", "13", "19", "D+2 1", "7", "13", "19", "24"], fontsize=8)
+    ax.set_xlabel("Hour ending", fontsize=9)
+    ax.set_title(title, fontsize=10)
+    if legend:
+        ax.legend(fontsize=7.5, loc="upper left", frameon=False)
 
 
 def main(config="final"):
@@ -54,14 +51,18 @@ def main(config="final"):
 
     success = (mae[MODEL] - mae["naive_day"]).idxmin()
     failure = mae[MODEL].idxmax()
-    for name, origin in [("success", success), ("failure", failure)]:
+    # One two-panel figure, since page space in the report is limited.
+    fig, axes = plt.subplots(1, 2, figsize=(8, 2.6), sharey=True)
+    for ax, name, origin in [(axes[0], "Success", success), (axes[1], "Failure", failure)]:
         row = mae.loc[origin]
         print(
             f"{name}: origin {origin.date()}, LightGBM MAE {row[MODEL]:.1f}, "
             f"naive MAE {row['naive_day']:.1f}"
         )
-        title = f"Forecast issued {origin:%a %b %d, %Y} 9 AM (LightGBM MAE ${row[MODEL]:.0f})"
-        plot_origin(preds, origin, title, FIG / f"example_{name}.png")
+        draw_origin(ax, preds, origin, f"{name}: issued {origin:%a %b %d, %Y}", legend=ax is axes[1])
+    axes[0].set_ylabel("$/MWh", fontsize=9)
+    fig.tight_layout()
+    fig.savefig(FIG / "examples.png", dpi=250)
 
 
 if __name__ == "__main__":
