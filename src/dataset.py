@@ -49,6 +49,9 @@ def load_forecasts():
     for name in ["load", "wind", "solar"]:
         files = sorted(RAW.glob(f"forecast_{name}_*.parquet"))
         f = pd.concat(pd.read_parquet(x) for x in files)
+        # The 2022-07-01 solar posting, from the day ERCOT changed that report's
+        # format, repeats each delivery hour several times.
+        f = f.drop_duplicates(["origin", "date", "hour"], keep="last")
         frames.append(f.set_index(["origin", "date", "hour"])["value"].rename(name))
     f = pd.concat(frames, axis=1).groupby(level=[0, 1]).ffill()
     f["net_load"] = f["load"] - f["wind"] - f["solar"]
