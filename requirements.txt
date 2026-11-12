@@ -1,0 +1,12 @@
+pandas
+numpy
+pyarrow
+lightgbm
+scikit-learn
+matplotlib
+requests
+holidays
+gridstatus
+openpyxl
+xlrd
+python-dotenv
