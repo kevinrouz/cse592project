@@ -80,6 +80,13 @@ def build():
     # Same hour one week before the target day; always on or before D.
     rows["price_week"] = price_at(rows["date"] - pd.Timedelta(days=7), rows["hour"])
 
+    # Same-hour statistics over the week ending on D, which are steadier than any
+    # single day's price.
+    by_hour = prices.unstack("hour")
+    for stat in ["mean", "max"]:
+        rolled = by_hour.rolling(7).agg(stat).stack().rename(f"price_7d_{stat}")
+        rows = rows.join(rolled, on=["origin", "hour"])
+
     daily = prices.groupby(level="date").agg(["mean", "max", "min"])
     daily.columns = [f"price_d0_{c}" for c in daily.columns]
     rows = rows.join(daily, on="origin")
@@ -90,6 +97,16 @@ def build():
     day_stats = forecasts.groupby(level=["origin", "date"])["net_load"].agg(["mean", "max", "min"])
     day_stats.columns = [f"net_load_day_{c}" for c in day_stats.columns]
     rows = rows.join(day_stats, on=["origin", "date"])
+    # Day D's prices are the model's strongest input, so it helps to say how the
+    # target hour's conditions differ from D's. D's net load forecast comes from the
+    # D-1 vintage, posted before D's prices were known.
+    today = forecasts["net_load"].reindex(
+        pd.MultiIndex.from_arrays(
+            [rows["origin"] - pd.Timedelta(days=1), rows["origin"], rows["hour"]]
+        )
+    )
+    rows["net_load_d0"] = today.to_numpy()
+    rows["net_load_change"] = rows["net_load"] - rows["net_load_d0"]
     rows["solar_share"] = rows["solar"] / rows["load"]
     rows["wind_share"] = rows["wind"] / rows["load"]
 
