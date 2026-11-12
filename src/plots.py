@@ -3,9 +3,10 @@
 Picks, among 2024 origins, the one where LightGBM's 48-hour MAE is lowest relative
 to the naive same-hour-yesterday forecast (a success case) and the one with the
 largest LightGBM MAE overall (a failure case). Ranking by improvement over naive
-avoids picking a flat, easy day as the success example.
+avoids picking a flat, easy day as the success example. The plotted model is the
+conformally calibrated one, whose median is the same as the uncalibrated model's.
 
-Usage: python src/plots.py [--raw]   (reads the matching val_predictions file)
+Usage: python src/plots.py [config]   (reads val_predictions_<config>.parquet; default "final")
 Writes reports/figures/example_success.png and example_failure.png.
 """
 
@@ -17,10 +18,11 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 FIG = ROOT / "reports" / "figures"
+MODEL = "lightgbm_cqr"
 
 
 def plot_origin(preds, origin, title, path):
-    lgbm = preds[(preds["model"] == "lightgbm") & (preds["origin"] == origin)]
+    lgbm = preds[(preds["model"] == MODEL) & (preds["origin"] == origin)]
     naive = preds[(preds["model"] == "naive_day") & (preds["origin"] == origin)]
     lgbm = lgbm.sort_values(["horizon", "hour"])
     naive = naive.sort_values(["horizon", "hour"])
@@ -42,26 +44,25 @@ def plot_origin(preds, origin, title, path):
     fig.savefig(path, dpi=200)
 
 
-def main(raw=False):
-    suffix = "_raw" if raw else ""
-    preds = pd.read_parquet(ROOT / "data" / "processed" / f"val_predictions{suffix}.parquet")
+def main(config="final"):
+    preds = pd.read_parquet(ROOT / "data" / "processed" / f"val_predictions_{config}.parquet")
     preds["err"] = (preds["price"] - preds["q50"]).abs()
     mae = preds.groupby(["origin", "model"])["err"].mean().unstack()
     # Require 48 complete hours so the plot is never missing a horizon.
-    counts = preds[preds["model"] == "lightgbm"].groupby("origin").size()
+    counts = preds[preds["model"] == MODEL].groupby("origin").size()
     mae = mae[counts.reindex(mae.index) == 48]
 
-    success = (mae["lightgbm"] - mae["naive_day"]).idxmin()
-    failure = mae["lightgbm"].idxmax()
+    success = (mae[MODEL] - mae["naive_day"]).idxmin()
+    failure = mae[MODEL].idxmax()
     for name, origin in [("success", success), ("failure", failure)]:
         row = mae.loc[origin]
         print(
-            f"{name}: origin {origin.date()}, LightGBM MAE {row['lightgbm']:.1f}, "
+            f"{name}: origin {origin.date()}, LightGBM MAE {row[MODEL]:.1f}, "
             f"naive MAE {row['naive_day']:.1f}"
         )
-        title = f"Forecast issued {origin:%a %b %d, %Y} 9 AM (LightGBM MAE ${row['lightgbm']:.0f})"
+        title = f"Forecast issued {origin:%a %b %d, %Y} 9 AM (LightGBM MAE ${row[MODEL]:.0f})"
         plot_origin(preds, origin, title, FIG / f"example_{name}.png")
 
 
 if __name__ == "__main__":
-    main(raw="--raw" in sys.argv)
+    main(sys.argv[1] if len(sys.argv) > 1 else "final")
