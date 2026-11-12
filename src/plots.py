@@ -30,11 +30,11 @@ def draw_origin(ax, preds, origin, title, legend):
 
     ax.fill_between(x, lgbm["q10"], lgbm["q90"], color="#9dc3e6", alpha=0.6, label="10-90% interval")
     ax.plot(x, lgbm["q50"], color="#1f4e79", lw=1.5, label="Median")
-    ax.plot(x, naive["q50"], color="#7f7f7f", lw=1, ls="--", label="Naive (same hour, day D)")
+    ax.plot(x, naive["q50"], color="#7f7f7f", lw=1, ls="--", label="Naive (same hour, day N)")
     ax.plot(x, lgbm["price"], color="#c00000", lw=1.5, label="Actual")
     ax.axvline(24.5, color="black", lw=0.5)
     ax.set_xticks([1, 7, 13, 19, 25, 31, 37, 43, 48])
-    ax.set_xticklabels(["D+1 1", "7", "13", "19", "D+2 1", "7", "13", "19", "24"], fontsize=8)
+    ax.set_xticklabels(["N+1 1", "7", "13", "19", "N+2 1", "7", "13", "19", "24"], fontsize=8)
     ax.set_xlabel("Hour ending", fontsize=9)
     ax.set_title(title, fontsize=10)
     if legend:

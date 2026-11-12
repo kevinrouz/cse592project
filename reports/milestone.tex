@@ -1,0 +1,96 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage[hidelinks]{hyperref}
+\setlength{\parskip}{3pt}
+\setlength{\parindent}{0pt}
+
+\title{\vspace{-2em}48-Hour Day-Ahead Electricity Price Forecasting in ERCOT\\\large Project Milestone Report}
+\author{Jordan Hernandez-Mares (jordh, 58132290) \and Kevin Farokhrouz (krouz, 67469130) \and Shreya Nadiger (snadiger, 66211386)}
+\date{\vspace{-1.5em}}
+
+\begin{document}
+\maketitle
+\vspace{-1.5em}
+
+\section{Problem Motivation and Description}
+
+\textbf{Motivation.} Wholesale prices in Texas's ERCOT market usually sit between \$20 and \$60/MWh but can reach the \$5{,}000 cap during heat waves, cold snaps, or evenings when solar output falls. ERCOT forecasts demand, wind and solar output, but not price. Retail providers selling at fixed rates, battery operators, and flexible loads such as data centers all need to know which hours will be expensive. The market is also shifting. In our data, the median summer price peak moved from 5\,PM in 2019 to 9\,PM in 2025 as solar grew. We ask whether our model beats naive and LEAR baselines, how much accuracy is lost from tomorrow (N+1) to the day after (N+2), how spike hours compare with normal hours, and whether our 10--90\% intervals contain the actual price 80\% of the time.
+
+\textbf{Problem statement.} At 9\,AM Central on day $N$, we forecast the 48 hourly day-ahead prices at ERCOT's North Hub for $N{+}1$ and $N{+}2$, each with a 10th, 50th and 90th percentile. The inputs, all published before 9\,AM, are day-ahead prices for $N$ and earlier, ERCOT's latest load, wind and solar forecasts for $N{+}1$ and $N{+}2$, the previous day's Henry Hub gas price, and calendar features. For example, the forecast issued Monday, August 19, 2024 saw 20\,GW of solar at 1\,PM Tuesday and predicted \$36 (actual \$32). For 8\,PM, when solar fell to 3.7\,GW and net load peaked at 70\,GW, it predicted a median of \$1{,}003 with interval [\$210, \$2{,}677], and the price cleared at \$648.
+
+\section{Related Work}
+
+Lago et al.~\cite{lago} released an open benchmark for day-ahead price forecasting on five markets (Nord Pool, PJM and three European exchanges) and showed that LEAR, a LASSO-regularized linear autoregression recalibrated daily, is a strong baseline. They recommend reporting MAE relative to a naive forecast (rMAE) and testing differences with the Diebold-Mariano test~\cite{dm}. ERCOT is not in the benchmark, and all its tasks are next-day only. We apply their protocol to ERCOT and add a second-day horizon. Marcjasz et al.~\cite{marcjasz} forecast the full price distribution with distributional neural networks on the German market. We also forecast a distribution, but through gradient-boosted quantile regression with conformal calibration, at two horizons. Uniejewski et al.~\cite{vst} compared 16 variance-stabilizing transformations on 12 datasets. We use one of them, the median/MAD-scaled area hyperbolic sine, which is also the transform built into the LEAR implementation of~\cite{lago}. Romano et al.~\cite{cqr} introduced conformalized quantile regression (CQR), which adjusts a quantile model's intervals using held-out errors. O'Connor et al.~\cite{oconnor} recently combined quantile regression with time-series conformal methods for day-ahead and balancing markets, and we apply plain and rolling CQR to ERCOT at two horizons. Closest to our setting, Bicen and Hammad~\cite{bicen} modeled ERCOT day-ahead prices for 2014--2024 with gradient boosting and found that lagged prices overshadow load and weather drivers and raise errors during spikes. Our model shows the same pattern, and we test explicit net-load-change features and probabilistic outputs as a response.
+
+\section{Method}
+
+\textbf{Terms.} The \emph{day-ahead market} (DAM) is an auction, with bids closing at 10\,AM on $N$, that sets a price for every hour of $N{+}1$. A \emph{hub} is a published average over many grid locations. We use North Hub, the reference for most ERCOT forward contracts. \emph{Net load} is forecast demand minus forecast wind and solar, the demand that dispatchable (mostly gas) plants must meet.
+
+\textbf{Data and information set.} At 9\,AM on $N$, $N$'s prices are known (they cleared on $N{-}1$) but $N{+}1$'s are not. ERCOT revises its load, wind and solar forecasts hourly. We downloaded every archived version for 2019--2025 from ERCOT's public API and keep the last one posted before 9\,AM, so no future information enters. Each example is one (origin day, target hour) pair with 28 features. The price features are the same-hour prices on $N$, $N{-}1$, $N{-}6$ and one week before the target, $N$'s daily mean, max and min, and the 7-day same-hour mean and max. The forecast features are load, wind, solar and net load for the target hour, the target day's net load mean, max and min, and the change in forecast net load from $N$ to the target hour. The rest are gas price, horizon, hour, weekday, month, holiday and day of year.
+
+\textbf{Model.} We fit one LightGBM model~\cite{lgbm} per quantile $\tau \in \{0.1, 0.5, 0.9\}$, shared across hours and horizons, with the \emph{pinball loss} $L_\tau(y,\hat q)=\max(\tau(y-\hat q),(\tau-1)(y-\hat q))$, whose expected value is minimized by the true $\tau$-quantile. Training prices include \$9{,}000 hours from Winter Storm Uri, so we train on $z=\operatorname{asinh}((p-c)/s)$ with $c,s$ the training median and median absolute deviation. Quantiles carry through increasing transforms, so inverting predicted $z$-quantiles gives price quantiles.
+
+\textbf{Calibration.} Quantile models fit to past years give intervals that are too narrow on new data. Asymmetric CQR shifts the bounds to $[\hat q_{10}-E_{lo},\ \hat q_{90}+E_{hi}]$, where $E_{lo}$ and $E_{hi}$ are the 90th percentiles of $\hat q_{10}-z$ and $z-\hat q_{90}$ on a calibration set, computed in $z$-space per horizon. The \emph{static} variant calibrates on 2023, and the \emph{rolling} variant uses the latest 90 days whose prices are known at forecast time.
+
+\textbf{Selection.} No choice uses the validation year. A model fit on 2019--2022 and scored on 2023 sets the number of boosting rounds and decides between variants. The chosen model is then refit on 2019--2023.
+
+\section{Preliminary Evaluation}
+
+\textbf{Dataset and metrics.} The dataset has 122{,}640 examples, split by target year into 2019--2023 training (87{,}576), 2024 validation (17{,}568) and 2025 test (17{,}496) sets. The test set stays untouched until the final report. We report MAE of the median (\$/MWh), rMAE against the naive same-hour-on-$N$ forecast, RMSE, pinball loss averaged over quantiles, interval coverage, and the Winkler score (width plus $10\times$ any miss distance, so wider intervals are penalized). The Diebold-Mariano test checks whether one forecast's errors are significantly smaller than another's, allowing for correlation between errors on nearby days. A spike hour is one above \$99.13, the 95th percentile of training prices, fixed so it means the same in every year.
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{lcccccccc}
+\toprule
+Model & MAE & MAE N+1 & MAE N+2 & rMAE & RMSE & Pinball & Coverage & Winkler \\
+\midrule
+Naive, same hour on $N$ & 15.49 & 14.13 & 16.85 & 1.00 & 76.8 & -- & -- & -- \\
+Naive, same hour last week & 18.02 & 18.02 & 18.02 & 1.16 & 84.0 & -- & -- & -- \\
+LightGBM, uncalibrated & 7.81 & 7.28 & 8.34 & 0.50 & 48.1 & 2.86 & 61.4\% & 46.7 \\
+LightGBM + static CQR & 7.81 & 7.28 & 8.34 & 0.50 & 48.1 & 2.79 & 80.7\% & 44.7 \\
+LightGBM + rolling CQR & 7.81 & 7.28 & 8.34 & 0.50 & 48.1 & 2.80 & 79.9\% & 44.8 \\
+\bottomrule
+\end{tabular}
+\caption{Results on the 2024 validation year. MAE, RMSE, pinball loss and Winkler score are in \$/MWh. Lower is better for all metrics except coverage, whose target is 80\%.}
+\label{tab:results}
+\end{table}
+
+\vspace{-0.5em}
+\textbf{Results.} LightGBM halves the naive error (Table~\ref{tab:results}), and Diebold-Mariano tests reject equal accuracy against both baselines at both horizons ($p<0.0001$). Moving from N+1 to N+2 raises its MAE by 15\%, versus 19\% for naive, because ERCOT's two-day-ahead forecasts stay informative. Uncalibrated intervals covered only 61\%. Models fit on 2019--2022 covered 80.5\% of their own training hours but 60.9\% of 2023, missing on both sides. CQR restores 80\% coverage and, although intervals widen from \$16.6 to \$20.5, improves the Winkler score. The 177 spike hours in 2024 are much harder. MAE on them is \$166 (N+1) and \$190 (N+2) versus about \$230 for naive and \$4--5 on normal hours, and spike-hour coverage is only 50--59\%. As a spike alarm, a median above \$99 has 78\% precision and 48\% recall, while a 90th percentile above \$99 catches 81\% of spikes at 44\% precision.
+
+\textbf{Examples.} Both cases in Figure~\ref{fig:ex} come from the January 2024 cold snap. In the success case, a \$2{,}000 morning price on $N$ makes the naive forecast repeat the spike, but forecast net load for 8\,AM dropped from 78\,GW on $N$ to 60\,GW on $N{+}1$ and LightGBM correctly predicts normal prices (48-hour MAE \$24 vs.\ \$364). In the failure case, issued on a mild Sunday, forecast net load for 8\,AM rose from 51\,GW on $N$ to 76\,GW on both following days. The model raised its forecast but predicted about \$460 for 8\,AM on $N{+}2$, which cleared near \$2{,}000, above even the 90th percentile. The model senses spikes but underestimates their height.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\textwidth]{examples.png}
+\vspace{-1.5em}
+\caption{Calibrated LightGBM forecasts for the 48 hours after two forecast origins.}
+\label{fig:ex}
+\end{figure}
+
+\vspace{-1em}
+\section{Completion Plan}
+
+\begin{enumerate}\setlength{\itemsep}{0pt}
+\item \textbf{LEAR baseline.} Add LEAR~\cite{lago} via epftoolbox, adapted so its N+2 forecast uses only prices known at 9\,AM on $N$.
+\item \textbf{Spike-aware calibration.} Separate conformal corrections for hours flagged as risky (high forecast median or net load), targeting 80\% spike-hour coverage.
+\item \textbf{Spike magnitude.} Test grid-tightness features, such as forecast reserve capacity, to reduce spike underestimation.
+\item \textbf{Neural network.} If time allows, train a small feed-forward network with a quantile output, as in the proposal.
+\item \textbf{Final evaluation.} Freeze the model, score it once on 2025, and answer the four questions by horizon and for spike and normal hours.
+\end{enumerate}
+
+\begin{thebibliography}{9}\small\setlength{\itemsep}{0pt}
+\bibitem{lago} J.~Lago, G.~Marcjasz, B.~De Schutter, R.~Weron. Forecasting day-ahead electricity prices: A review of state-of-the-art algorithms, best practices and an open-access benchmark. \emph{Applied Energy}, 293:116983, 2021.
+\bibitem{marcjasz} G.~Marcjasz, M.~Narajewski, R.~Weron, F.~Ziel. Distributional neural networks for electricity price forecasting. \emph{Energy Economics}, 125:106843, 2023.
+\bibitem{vst} B.~Uniejewski, R.~Weron, F.~Ziel. Variance stabilizing transformations for electricity spot price forecasting. \emph{IEEE Trans.\ Power Systems}, 33(2):2219--2229, 2018.
+\bibitem{cqr} Y.~Romano, E.~Patterson, E.~Cand\`es. Conformalized quantile regression. \emph{NeurIPS}, 2019.
+\bibitem{dm} F.~X.~Diebold, R.~S.~Mariano. Comparing predictive accuracy. \emph{J.\ Business \& Economic Statistics}, 13(3):253--263, 1995.
+\bibitem{lgbm} G.~Ke et al. LightGBM: A highly efficient gradient boosting decision tree. \emph{NeurIPS}, 2017.
+\bibitem{oconnor} C.~O'Connor, M.~Bahloul, R.~Rossi, S.~Prestwich, A.~Visentin. Conformal prediction for electricity price forecasting in the day-ahead and real-time balancing market. \emph{Energy and AI}, 21:100571, 2025.
+\bibitem{bicen} Y.~Bicen, E.~Hammad. Parameters overshadowed by price lags: Load, climate, and calendar effects in ERCOT day-ahead price formation. \emph{IEEE SmartGridComm} (accepted), 2026. arXiv:2608.20865.
+\end{thebibliography}
+
+\end{document}
