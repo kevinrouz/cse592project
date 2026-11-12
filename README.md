@@ -30,8 +30,13 @@ Run the scripts from `src/` in this order. Each one writes to `data/` or `report
    year, and skips files that already exist, so an interrupted run can be restarted.
 3. `dataset.py` joins everything into one row per (origin day, target hour) and assigns rows to
    train (2019-2023), validation (2024) and test (2025) by the target date.
-4. `train.py` fits the naive baselines and the LightGBM quantile models and writes the validation
-   metrics to `reports/val_metrics.csv`. Pass `--raw` to train on untransformed prices.
-5. `plots.py` and `eda.py` write the figures in `reports/figures/`.
+4. `experiments.py` compares model configurations by fitting each on 2019-2022 and scoring it
+   on 2023, and writes `reports/selection_2023.csv`. The validation year plays no part in the
+   choice.
+5. `train.py [config]` fits the naive baselines and the chosen LightGBM configuration (default
+   `final`), calibrates its intervals with conformalized quantile regression, and writes the
+   validation metrics and Diebold-Mariano tests to `reports/val_metrics_<config>.csv` and
+   `reports/val_dm_<config>.csv`.
+6. `plots.py` and `eda.py` write the figures in `reports/figures/`.
 
 The 2025 test year is not scored anywhere yet. It is reserved for the final evaluation.
